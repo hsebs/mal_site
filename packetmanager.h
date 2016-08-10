@@ -166,6 +166,7 @@ public:
 
     ~StringManager()
     {
+        if(buffer)
         delete this->buffer;
     }
 
@@ -196,9 +197,12 @@ public:
    {
        return 0;
    }
-    u_int8_t       getProtocolTypeAsString (char*,u_int8_t)
+    u_int8_t       getProtocolTypeAsString (char* buffer,u_int8_t size)
    {
-       return 0;
+        if(size<7)
+            return 7;
+        sprintf(buffer,"STRING");
+        return 0;
    }
 
     u_int8_t       getSourceAddress(u_int8_t*,u_int8_t)
@@ -527,6 +531,12 @@ public:
             return 2;
         memcpy(address,&tcpHeader.th_dport,2);
         return 0;
+    }
+
+    ProtocolManager*setSubProtocolManager(ProtocolManager* subProtocolManager)
+    {
+        ProtocolManager::setSubProtocolManager(subProtocolManager);
+        return this;
     }
 };
 
