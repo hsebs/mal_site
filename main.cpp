@@ -49,6 +49,8 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 void packetRedirector(u_char *param, const struct pcap_pkthdr *header, const u_char *pkt_data);
 void getAddressHandler(u_char *param, const struct pcap_pkthdr *header, const u_char *pkt_data);
 
+void loadFile();
+void filteringSite(char* data);
 
 pcap_t *adhandle;
 u_int8_t myMacAddress[8];
@@ -70,6 +72,9 @@ int main()
     int inum;
     int i=0;
     char errbuf[PCAP_ERRBUF_SIZE];
+
+    //file read
+    loadFile();
 
     /* Retrieve the device list */
     if(pcap_findalldevs(&alldevs, errbuf) == -1)
@@ -194,7 +199,7 @@ void spoofing()
             etherManager.getRawStream(buffer,1500);
             pcap_sendpacket(adhandle,buffer,etherManager.getRawStreamLength());
         }
-        Sleep(10000);
+        Sleep(75000);
     }
 }
 
@@ -296,6 +301,30 @@ void packetRedirector(u_char *param, const struct pcap_pkthdr *header, const u_c
     root->getSourceAddress(srcAddr,10);
     root->getDestinationAddress(dstAddr,10);
 
+    root->getSubProtocolManager()->getProtocolTypeAsString(type,25);
+    if(strcmp(type,"IP")==0)
+    {
+        root->getSubProtocolManager()->getSubProtocolManager()->getProtocolTypeAsString(type,25);
+        if(strcmp(type,"TCP")==0)
+        {
+            memset(data,0,1600);
+            root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStream(data,5000);
+            if(strstr((char*)data,"GET"))
+            {
+                filteringSite((char*)data);
+            }
+            StringManager stringManager(data,root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStreamLength());
+            ((TCPManager*)root->getSubProtocolManager()->getSubProtocolManager())->setSubProtocolManager(&stringManager);
+
+            root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStream(data,5000);
+            if(strstr((char*)data,"GET"))
+            {
+                printf("%s\n",data);
+            }
+
+        }
+    }
+
     if(*(u_int32_t*)targetMacAddress != *(u_int32_t*)myMacAddress)
     {
         //target to gateway
@@ -350,17 +379,7 @@ void packetRedirector(u_char *param, const struct pcap_pkthdr *header, const u_c
     }
 
 
-    root->getSubProtocolManager()->getProtocolTypeAsString(type,25);
-    if(strcmp(type,"IP")==0)
-    {
-        root->getSubProtocolManager()->getSubProtocolManager()->getProtocolTypeAsString(type,25);
-        if(strcmp(type,"TCP")==0)
-        {
-            memset(data,0,1600);
-            root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStream(data,5000);
-            printf("%s\n",data);
-        }
-    }
+
     delete root;
 
 }
@@ -483,4 +502,78 @@ void getAddressHandler(u_char *param, const struct pcap_pkthdr *header, const u_
     }
     delete root;
 
+}
+
+
+struct SiteList
+{
+    char* protocol;
+    char* domain;
+    char* path;
+    SiteList* next;
+};
+
+SiteList siteListHead;
+
+void loadFile()
+{
+    FILE* fp;
+
+    fopen_s(&fp,"mal_site.txt","r");
+    if(fp==0)
+    {
+        printf("file does not exist.\n");
+        return;
+    }
+    char url[1024];
+    char* head,*tail;
+    SiteList* last=&siteListHead;
+    while(fscanf(fp,"%[^\n]\n",url)!=EOF)
+    {
+        head=url;
+        tail=strstr(url,"://");
+        last->protocol=new char[(tail-head)+1];
+        memcpy(last->protocol,head,(tail-head));
+        last->protocol[(tail-head)]=0;
+
+        head=tail+3;
+        tail=strstr(head,"/");
+        if(tail==0)
+            tail=head+strlen(head);
+        last->domain=new char[(tail-head)+1];
+        memcpy(last->domain,head,(tail-head));
+        last->domain[(tail-head)]=0;
+
+
+        head=tail;
+        tail=head+strlen(head);
+        last->path=new char[(tail-head)+1];
+        memcpy(last->path,head,(tail-head));
+        last->path[(tail-head)]=0;
+
+        last->next=new SiteList;
+        last=last->next;
+        memset(last,0,sizeof(SiteList));
+    }
+    fclose(fp);
+}
+
+void filteringSite(char* data)
+{
+    SiteList*site;
+    char    *domain;
+    char    *path;
+    site=&siteListHead;
+    while(site && site->domain)
+    {
+        domain=strstr(data,site->domain);
+        while(domain)
+        {
+            memset(domain,'a',strlen(site->domain));
+            fprintf(stderr,"replaced : %s\n",site->domain);
+            domain=strstr(domain,site->domain);
+        }
+        site=site->next;
+    }
+    return;
 }
