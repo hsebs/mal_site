@@ -199,7 +199,7 @@ void spoofing()
             etherManager.getRawStream(buffer,1500);
             pcap_sendpacket(adhandle,buffer,etherManager.getRawStreamLength());
         }
-        Sleep(75000);
+        Sleep(4900);
     }
 }
 
