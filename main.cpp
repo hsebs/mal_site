@@ -309,7 +309,7 @@ void packetRedirector(u_char *param, const struct pcap_pkthdr *header, const u_c
         {
             memset(data,0,1600);
             root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStream(data,5000);
-            if(strstr((char*)data,"GET"))
+            if(strstr((char*)data,"GET") ||strstr((char*)data,"POST")||strstr((char*)data,"DELETE")||strstr((char*)data,"PUT") )
             {
                 filteringSite((char*)data);
             }
@@ -317,7 +317,7 @@ void packetRedirector(u_char *param, const struct pcap_pkthdr *header, const u_c
             ((TCPManager*)root->getSubProtocolManager()->getSubProtocolManager())->setSubProtocolManager(&stringManager);
 
             root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStream(data,5000);
-            if(strstr((char*)data,"GET"))
+            if(strstr((char*)data,"GET") ||strstr((char*)data,"POST")||strstr((char*)data,"DELETE")||strstr((char*)data,"PUT") )
             {
                 printf("%s\n",data);
             }
