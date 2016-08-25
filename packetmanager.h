@@ -98,7 +98,7 @@ protected:
     }
 
     /*It uses deep copy of origin.*/
-    void                    setSubProtocolManager(ProtocolManager* newSubProtocolManager)
+    virtual ProtocolManager*setSubProtocolManager(ProtocolManager* newSubProtocolManager)
     {
         if(subProtocolManager)
         {
@@ -108,6 +108,7 @@ protected:
             this->subProtocolManager=newSubProtocolManager->clone();
         else
             this->subProtocolManager=NULL;
+        return this;
     }
 
 public:
@@ -134,9 +135,9 @@ public:
     virtual u_int32_t       getRawStream            (u_int8_t*,u_int32_t)=0;
     virtual u_int32_t       getRawStreamLength      ()=0;
 
-    virtual u_int8_t       getSourceAddressAsString(char*,u_int8_t)=0;
-    virtual u_int8_t       getDestinationAddressAsString(char*,u_int8_t)=0;
-    virtual u_int8_t       getProtocolTypeAsString (char*,u_int8_t)=0;
+    virtual u_int8_t        getSourceAddressAsString(char*,u_int8_t)=0;
+    virtual u_int8_t        getDestinationAddressAsString(char*,u_int8_t)=0;
+    virtual u_int8_t        getProtocolTypeAsString (char*,u_int8_t)=0;
 
 
     virtual u_int8_t       getSourceAddress(u_int8_t*,u_int8_t)=0;
@@ -268,6 +269,39 @@ class UDPManager : public ProtocolManager
 {
 private:
     libnet_udp_hdr udpHeader;
+    libnet_ipv4_hdr ipv4Header;
+
+    void setCheckSum()
+    {
+        u_int32_t sum=0;
+        int i;
+
+        sum+= ntohs(ipv4Header.ip_src.S_un.S_un_w.s_w1);
+        sum+= ntohs(ipv4Header.ip_src.S_un.S_un_w.s_w2);
+        sum+= ntohs(ipv4Header.ip_dst.S_un.S_un_w.s_w1);
+        sum+= ntohs(ipv4Header.ip_dst.S_un.S_un_w.s_w2);
+
+        sum+=ntohs(ipv4Header.ip_p*256);
+        sum+=ntohs(ipv4Header.ip_len)-sizeof(libnet_ipv4_hdr);
+
+        udpHeader.uh_sum=0;
+        u_int16_t* buffer= new u_int16_t[getRawStreamLength()/2+1];
+        buffer[(getRawStreamLength())/2]=0;
+        getRawStream((u_int8_t*)buffer,getRawStreamLength());
+        for(i=0;i<(getRawStreamLength()+1)/2;i++)
+        {
+            sum = sum + ntohs(buffer[i]);
+        }
+        delete[] buffer;
+
+        while( sum >> 16 )
+                sum = ( sum & 0xFFFF ) + ( sum >> 16 );
+        sum = ~sum;
+
+        udpHeader.uh_sum = ntohs((u_int16_t)sum);
+    }
+
+
 public:
     UDPManager(UDPManager* origin)
     {
@@ -275,7 +309,7 @@ public:
         ProtocolManager* subProtocolManager=origin->getSubProtocolManager();
         if(subProtocolManager)
         {
-            this->ProtocolManager::setSubProtocolManager(subProtocolManager);
+            this->setSubProtocolManager(subProtocolManager);
         }
     }
 
@@ -293,7 +327,7 @@ public:
             fprintf(stderr,"UDP size error\n");
             return;
         }
-        subProtocolManager=new StringManager(protocolStream+sizeof(libnet_udp_hdr),size-sizeof(libnet_udp_hdr));
+        subProtocolManager=new StringManager(protocolStream+sizeof(libnet_udp_hdr),ntohs(udpHeader.uh_ulen)-sizeof(libnet_udp_hdr));
         setSubProtocolManager(subProtocolManager);
         delete subProtocolManager;
     }
@@ -366,6 +400,26 @@ public:
         memcpy(address,&udpHeader.uh_dport,2);
         return 0;
     }
+
+    void           setIPv4Header(libnet_ipv4_hdr ipv4Header)
+    {
+        this->ipv4Header=ipv4Header;
+        setCheckSum();
+    }
+
+    void            setAddresss(u_int8_t* sourceAddress,u_int8_t* destinationAddress)
+    {
+        memcpy(&udpHeader.uh_sport,sourceAddress,     2);
+        memcpy(&udpHeader.uh_dport,destinationAddress,2);
+        setCheckSum();
+    }
+
+    ProtocolManager*setSubProtocolManager(ProtocolManager* subProtocolManager)
+    {
+        ProtocolManager::setSubProtocolManager(subProtocolManager);
+        setCheckSum();
+        return this;
+    }
 };
 
 class TCPManager : public ProtocolManager
@@ -375,6 +429,38 @@ private:
     u_int8_t* tcpOption[32];
     u_int8_t optionCount;
     u_int8_t headerSize;
+    libnet_ipv4_hdr ipv4Header;
+
+    void setCheckSum()
+    {
+        u_int32_t sum=0;
+        int i;
+
+        sum+= ntohs(ipv4Header.ip_src.S_un.S_un_w.s_w1);
+        sum+= ntohs(ipv4Header.ip_src.S_un.S_un_w.s_w2);
+        sum+= ntohs(ipv4Header.ip_dst.S_un.S_un_w.s_w1);
+        sum+= ntohs(ipv4Header.ip_dst.S_un.S_un_w.s_w2);
+
+        sum+=ntohs(ipv4Header.ip_p*256);
+        sum+=ntohs(ipv4Header.ip_len)-sizeof(libnet_ipv4_hdr);
+
+        tcpHeader.th_sum=0;
+        u_int16_t* buffer= new u_int16_t[getRawStreamLength()/2+1];
+        buffer[(getRawStreamLength())/2]=0;
+        getRawStream((u_int8_t*)buffer,getRawStreamLength());
+        for(i=0;i<(getRawStreamLength()+1)/2;i++)
+        {
+            sum = sum + ntohs(buffer[i]);
+        }
+        delete[] buffer;
+
+        while( sum >> 16 )
+                sum = ( sum & 0xFFFF ) + ( sum >> 16 );
+        sum = ~sum;
+
+        tcpHeader.th_sum = ntohs((u_int16_t)sum);
+    }
+
 public:
     TCPManager(TCPManager* origin)
     {
@@ -394,7 +480,7 @@ public:
         ProtocolManager* subProtocolManager=origin->getSubProtocolManager();
         if(subProtocolManager)
         {
-            this->ProtocolManager::setSubProtocolManager(subProtocolManager);
+            this->setSubProtocolManager(subProtocolManager);
         }
     }
 
@@ -436,6 +522,19 @@ public:
         subProtocolManager=new StringManager(protocolStream+headerSize,size-headerSize);
         setSubProtocolManager(subProtocolManager);
         delete subProtocolManager;
+    }
+
+    TCPManager(u_int16_t sourcePort,u_int16_t destinationPort, u_int32_t sequenceNumber, u_int32_t acknowledgmentNumber, u_int8_t flags, ProtocolManager* subProtocolManager)
+    {
+        memset(&tcpHeader,0,sizeof(libnet_tcp_hdr));
+        memset(&ipv4Header,0,sizeof(libnet_tcp_hdr));
+        tcpHeader.th_sport=ntohs(sourcePort);
+        tcpHeader.th_dport=ntohs(destinationPort);
+        tcpHeader.th_seq=ntohl(sequenceNumber);
+        tcpHeader.th_ack=ntohl(acknowledgmentNumber);
+        tcpHeader.th_flags=flags;
+        ((u_int8_t*)&tcpHeader)[12]=5<<4;
+        setSubProtocolManager(subProtocolManager);
     }
 
     ~TCPManager()
@@ -533,9 +632,23 @@ public:
         return 0;
     }
 
+    void           setIPv4Header(libnet_ipv4_hdr ipv4Header)
+    {
+        this->ipv4Header=ipv4Header;
+        setCheckSum();
+    }
+
+    void            setAddresss(u_int16_t sourcePort,u_int16_t destinationPort)
+    {
+        tcpHeader.th_sport=ntohs(sourcePort);
+        tcpHeader.th_dport=ntohs(destinationPort);
+        setCheckSum();
+    }
+
     ProtocolManager*setSubProtocolManager(ProtocolManager* subProtocolManager)
     {
         ProtocolManager::setSubProtocolManager(subProtocolManager);
+        setCheckSum();
         return this;
     }
 };
@@ -823,21 +936,29 @@ private:
 
     void setCheckSum()
     {
-        u_int32_t sum;
-        u_int16_t word;
-        char* buff=(char*)&ipv4Header;
+        u_int32_t sum=0;
+        u_int16_t* buff=(u_int16_t*)&ipv4Header;
         int i;
         ipv4Header.ip_sum=0;
-        for(i=0;i<sizeof(libnet_ipv4_hdr);i+=2)
+        for(i=0;i<sizeof(libnet_ipv4_hdr)/2;i++)
         {
-            word = ( ( buff[i]<<8) & 0xFF00 )+( buff[i+1] & 0xFF );
-            sum = sum + (u_int)word;
+            sum = sum + ntohs(buff[i]);
         }
         while( sum >> 16 )
                 sum = ( sum & 0xFFFF ) + ( sum >> 16 );
         sum = ~sum;
 
-        ipv4Header.ip_sum = (u_int16_t)sum;
+        ipv4Header.ip_sum = ntohs((u_int16_t)sum);
+
+        switch(ipv4Header.ip_p)
+        {
+        case IPPROTO_TCP:
+            ((TCPManager*)getSubProtocolManager())->setIPv4Header(ipv4Header);
+            break;
+        case IPPROTO_UDP:
+            ((UDPManager*)getSubProtocolManager())->setIPv4Header(ipv4Header);
+            break;
+        }
     }
 
 public:
@@ -850,7 +971,7 @@ public:
         ProtocolManager* subProtocolManager=origin->getSubProtocolManager();
         if(subProtocolManager)
         {
-            this->ProtocolManager::setSubProtocolManager(subProtocolManager);
+            this->setSubProtocolManager(subProtocolManager);
         }
     }
 
@@ -869,22 +990,27 @@ public:
             }
             version=4;
             ipv4Header=*(libnet_ipv4_hdr*)protocolStream;
+            if(size<ntohs(ipv4Header.ip_len))
+            {
+                fprintf(stderr,"IPv4 size error\n");
+                return;
+            }
 
             //TODO
             switch(ipv4Header.ip_p)
             {
             case IPPROTO_UDP:
-                subProtocolManager = new UDPManager(protocolStream+sizeof(libnet_ipv4_hdr),size-sizeof(libnet_ipv4_hdr));
+                subProtocolManager = new UDPManager(protocolStream+sizeof(libnet_ipv4_hdr),ntohs(ipv4Header.ip_len)-sizeof(libnet_ipv4_hdr));
                 setSubProtocolManager(IPPROTO_UDP,subProtocolManager);
                 delete subProtocolManager;
                 break;
             case IPPROTO_TCP:
-                subProtocolManager = new TCPManager(protocolStream+sizeof(libnet_ipv4_hdr),size-sizeof(libnet_ipv4_hdr));
+                subProtocolManager = new TCPManager(protocolStream+sizeof(libnet_ipv4_hdr),ntohs(ipv4Header.ip_len)-sizeof(libnet_ipv4_hdr));
                 setSubProtocolManager(IPPROTO_TCP,subProtocolManager);
                 delete subProtocolManager;
                 break;
             default:
-                subProtocolManager = new StringManager(protocolStream+sizeof(libnet_ipv4_hdr),size-sizeof(libnet_ipv4_hdr));
+                subProtocolManager = new StringManager(protocolStream+sizeof(libnet_ipv4_hdr),ntohs(ipv4Header.ip_len)-sizeof(libnet_ipv4_hdr));
                 setSubProtocolManager(ipv4Header.ip_p,subProtocolManager);
                 delete subProtocolManager;
                 break;
@@ -935,24 +1061,24 @@ public:
 
     ProtocolManager*setSubProtocolManager(ProtocolManager* subProtocolManager)
     {
-        char buffer[256];
+        char type[256]={0,};
         switch(version)
         {
         case 4:
-            subProtocolManager->getProtocolTypeAsString(buffer,200);
+            subProtocolManager->getProtocolTypeAsString(type,200);
             do
             {
-                if(strcmp(buffer,"TCP")==0)
+                if(strcmp(type,"TCP")==0)
                 {
                     ipv4Header.ip_p=IPPROTO_TCP;
                     break;
                 }
-                if(strcmp(buffer,"UDP")==0)
+                if(strcmp(type,"UDP")==0)
                 {
                     ipv4Header.ip_p=IPPROTO_UDP;
                     break;
                 }
-                if(strcmp(buffer,"ICMP")==0)
+                if(strcmp(type,"ICMP")==0)
                 {
                     ipv4Header.ip_p=IPPROTO_ICMP;
                     break;
@@ -964,6 +1090,10 @@ public:
             break;
         }
         ProtocolManager::setSubProtocolManager(subProtocolManager);
+        if(ipv4Header.ip_p==IPPROTO_TCP)
+            ((TCPManager*)getSubProtocolManager())->setIPv4Header(ipv4Header);
+        ipv4Header.ip_len=ntohs(getSubProtocolManager()->getRawStreamLength()+sizeof(libnet_ipv4_hdr));
+        setCheckSum();
         return this;
     }
 
@@ -973,7 +1103,9 @@ public:
         {
         case 4:
             if(subProtocolType < 256)
+            {
                 ipv4Header.ip_p=(u_int8_t)subProtocolType;
+            }
             else
                 fprintf(stderr,"IP subProtocolType is wrong\n");
             break;
@@ -981,6 +1113,10 @@ public:
             break;
         }
         ProtocolManager::setSubProtocolManager(subProtocolManager);
+        if(subProtocolType==IPPROTO_TCP)
+            ((TCPManager*)getSubProtocolManager())->setIPv4Header(ipv4Header);
+        ipv4Header.ip_len=ntohs(getSubProtocolManager()->getRawStreamLength()+sizeof(libnet_ipv4_hdr));
+        setCheckSum();
         return this;
     }
 
@@ -1106,7 +1242,6 @@ class EthernetManager : public ProtocolManager
 {
 private:
     libnet_ethernet_hdr ethernetHeader;
-
 public:
     EthernetManager(u_int8_t* packetStream, int size)
     {
@@ -1141,7 +1276,6 @@ public:
             //TODO
             subProtocolManager=new StringManager(packetStream+sizeof(libnet_ethernet_hdr), size-sizeof(libnet_ethernet_hdr));
             setSubProtocolManager(ntohs(ethernetHeader.ether_type),subProtocolManager);
-            size=subProtocolManager->getRawStreamLength();
             delete subProtocolManager;
             fprintf(stderr,"Ethernet subprotocol is not supported by Packet Manager.\n");
             break;
@@ -1154,7 +1288,7 @@ public:
         ProtocolManager* subProtocolManager=origin->getSubProtocolManager();
         if(subProtocolManager)
         {
-            this->ProtocolManager::setSubProtocolManager(subProtocolManager);
+            this->setSubProtocolManager(subProtocolManager);
         }
     }
 
@@ -1192,14 +1326,15 @@ public:
     {
         setAddresss(sourceAddress,destinationAddress);
         ethernetHeader.ether_type=0;
-        ProtocolManager::setSubProtocolManager(NULL);
+        setSubProtocolManager(NULL);
     }
 
     EthernetManager()
     {
         memset(&ethernetHeader,0,sizeof(ethernetHeader));
-        ProtocolManager::setSubProtocolManager(NULL);
+        setSubProtocolManager(NULL);
     }
+
 
     ProtocolManager* clone()
     {
@@ -1236,8 +1371,8 @@ public:
     {
         if(subProtocolManager)
         {
-            char type[256];
-            subProtocolManager->getProtocolTypeAsString(type,200);
+            char type[25]={0,};
+            subProtocolManager->getProtocolTypeAsString(type,25);
 
             do{
                 if(strcmp(type,"IP")==0)
@@ -1274,11 +1409,6 @@ public:
         return this;
     }
 
-    ProtocolManager* getSubProtocolManager()
-    {
-        return ProtocolManager::getSubProtocolManager();
-    }
-
     u_int32_t       getSubProtocolType()
     {
         return ntohs(ethernetHeader.ether_type);
@@ -1292,7 +1422,7 @@ public:
 
         memset(buffer,0,getRawStreamLength());
         memcpy(buffer,&ethernetHeader,sizeof(ethernetHeader));
-        subProtocolManager=ProtocolManager::getSubProtocolManager();
+        subProtocolManager=getSubProtocolManager();
         if(subProtocolManager)
         {
             subProtocolManager->getRawStream(buffer+sizeof(libnet_ethernet_hdr),subProtocolManager->getRawStreamLength());
@@ -1304,15 +1434,15 @@ public:
     {
         u_int32_t size;
         ProtocolManager* subProtocolManager;
-        subProtocolManager=ProtocolManager::getSubProtocolManager();
+        subProtocolManager=getSubProtocolManager();
         if(subProtocolManager)
         {
             size= sizeof(libnet_ethernet_hdr)+subProtocolManager->getRawStreamLength();
         }
         else
             size= sizeof(libnet_ethernet_hdr);
-        //if(size<60)
-        //    size=60;
+        if(size<60)
+            size=60;
         return size;
     }
 
