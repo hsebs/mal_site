@@ -50,7 +50,7 @@ void packetRedirector(u_char *param, const struct pcap_pkthdr *header, const u_c
 void getAddressHandler(u_char *param, const struct pcap_pkthdr *header, const u_char *pkt_data);
 
 void loadFile();
-void filteringSite(char* data);
+bool filteringSite(char* data);
 
 pcap_t *adhandle;
 u_int8_t myMacAddress[8];
@@ -225,35 +225,78 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
     printf("%s.%.6d len:%d \n", timestr, header->ts.tv_usec, header->len);
 
 
-    u_int8_t* data;
     ProtocolManager* root    =new EthernetManager((u_int8_t*)pkt_data,header->len);
     ProtocolManager* protocolManager=root;
     ProtocolManager* subProtocolManager;
-
+/*
+    u_int8_t* data;
     data=new u_int8_t[protocolManager->getRawStreamLength()];
     protocolManager->getRawStream(data,protocolManager->getRawStreamLength());
     if(header->len!=root->getRawStreamLength() || memcmp(data,pkt_data,header->len)!=0)
     {
+        fprintf(stderr,"offset : %d\n",memcmp(data,pkt_data,header->len));
         fprintf(stderr,"Origin Data (%d): \n",header->len);
         for(int i=0;i<header->len;i++)
         {
+            fprintf(stderr,"%02x ",pkt_data[i]);
             if((i+1)%16==0)
                 fprintf(stderr,"\n");
-            fprintf(stderr,"%02x ",pkt_data[i]);
         }
         fprintf(stderr,"\n");
 
         fprintf(stderr,"New Data (%d): \n",root->getRawStreamLength());
         for(int i=0;i<protocolManager->getRawStreamLength();i++)
         {
+            fprintf(stderr,"%02x ",data[i]);
             if((i+1)%16==0)
                 fprintf(stderr,"\n");
-            fprintf(stderr,"%02x ",data[i]);
         }
         fprintf(stderr,"\n");
     }
     delete data;
+//*/
+//*
+    char type[25];
+    u_int8_t data[1700];
+    u_int8_t data2[1700];
+    root->getSubProtocolManager()->getProtocolTypeAsString(type,25);
+    if(strcmp(type,"IP")==0)
+    {
+        root->getSubProtocolManager()->getSubProtocolManager()->getProtocolTypeAsString(type,25);
+        if(strcmp(type,"TCP")==0)
+        {
 
+            EthernetManager root2((EthernetManager*)root);
+            StringManager stringManager(data,root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStreamLength());
+            ((TCPManager*)root2.getSubProtocolManager()->getSubProtocolManager())->setSubProtocolManager(&stringManager);
+            //((TCPManager*)root2.getSubProtocolManager()->getSubProtocolManager())->setSubProtocolManager(root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager());
+
+            root->getRawStream(data,root->getRawStreamLength());
+            root2.getRawStream(data2,root2.getRawStreamLength());
+
+            if(memcmp(data,data2,root->getRawStreamLength()))
+            {
+                fprintf(stderr,"Old Data (%d): \n",root->getRawStreamLength());
+                for(int i=0;i<protocolManager->getRawStreamLength();i++)
+                {
+                    fprintf(stderr,"%02x ",data[i]);
+                    if((i+1)%16==0)
+                        fprintf(stderr,"\n");
+                }
+                fprintf(stderr,"\n");
+
+                fprintf(stderr,"New Data (%d): \n",root2.getRawStreamLength());
+                for(int i=0;i<protocolManager->getRawStreamLength();i++)
+                {
+                    fprintf(stderr,"%02x ",data2[i]);
+                    if((i+1)%16==0)
+                        fprintf(stderr,"\n");
+                }
+                fprintf(stderr,"\n");
+            }
+        }
+    }
+//*/
     while(protocolManager)
     {
         char type[256]={0,};
@@ -275,9 +318,6 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
         subProtocolManager =protocolManager->getSubProtocolManager();
         protocolManager=subProtocolManager;
     }
-    //    if(pcap_sendpacket(adhandle,pkt_data,header->len))
-    //    if(pcap_sendpacket(adhandle,data,protocolManager->getRawStreamLength()))
-    //        fprintf(stderr,"error\n");
     delete root;
     printf("\n");
 
@@ -293,10 +333,11 @@ void packetRedirector(u_char *param, const struct pcap_pkthdr *header, const u_c
     char     type[25];
     u_int8_t srcAddr[16];
     u_int8_t dstAddr[16];
-    u_int8_t data[5000];
+    u_int8_t data[2000];
     ProtocolManager* root    =new EthernetManager((u_int8_t*)pkt_data,header->len);
     ProtocolManager* protocolManager=root;
     ProtocolManager* subProtocolManager;
+    bool drop=false;
 
     root->getSourceAddress(srcAddr,10);
     root->getDestinationAddress(dstAddr,10);
@@ -308,22 +349,20 @@ void packetRedirector(u_char *param, const struct pcap_pkthdr *header, const u_c
         if(strcmp(type,"TCP")==0)
         {
             memset(data,0,1600);
-            root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStream(data,5000);
+            root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStream(data,1600);
             if(strstr((char*)data,"GET") ||strstr((char*)data,"POST")||strstr((char*)data,"DELETE")||strstr((char*)data,"PUT") )
             {
-                filteringSite((char*)data);
+                if(filteringSite((char*)data))
+                {
+                    printf("%s\n",data);
+                    drop=true;
+                }
             }
-            StringManager stringManager(data,root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStreamLength());
-            ((TCPManager*)root->getSubProtocolManager()->getSubProtocolManager())->setSubProtocolManager(&stringManager);
-
-            root->getSubProtocolManager()->getSubProtocolManager()->getSubProtocolManager()->getRawStream(data,5000);
-            if(strstr((char*)data,"GET") ||strstr((char*)data,"POST")||strstr((char*)data,"DELETE")||strstr((char*)data,"PUT") )
-            {
-                printf("%s\n",data);
-            }
-
         }
     }
+
+    if(drop)
+        return ;
 
     if(*(u_int32_t*)targetMacAddress != *(u_int32_t*)myMacAddress)
     {
@@ -558,22 +597,28 @@ void loadFile()
     fclose(fp);
 }
 
-void filteringSite(char* data)
+bool filteringSite(char* data)
 {
     SiteList*site;
     char    *domain;
     char    *path;
     site=&siteListHead;
+    bool    found=false;
     while(site && site->domain)
     {
         domain=strstr(data,site->domain);
-        while(domain)
+        path=strstr(data,site->path);
+        if(domain && path)
         {
-            memset(domain,'a',strlen(site->domain));
-            fprintf(stderr,"replaced : %s\n",site->domain);
-            domain=strstr(domain,site->domain);
+            found=true;
+            while(domain)
+            {
+                memset(domain,'a',strlen(site->domain));
+                fprintf(stderr,"replaced : %s\n",site->domain);
+                domain=strstr(domain,site->domain);
+            }
         }
         site=site->next;
     }
-    return;
+    return found;
 }
